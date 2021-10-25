@@ -1,24 +1,32 @@
-import { StrutAny, StrutInfer, toHex } from 'binparse';
+import { Diablo2Version } from '@diablo2/data';
+import { bp, StrutAny, StrutInfer, toHex } from 'binparse';
 import 'source-map-support/register.js';
 import { Diablo2Player } from './d2.player.js';
 import { LogType } from './logger.js';
 import { Process } from './process.js';
-import { Scanner, ScannerBuffer } from './scanner.js';
-import { PlayerStrut } from './structures.js';
-import { D2RStrut } from './struts/d2r.js';
+import { ScannerBuffer } from './scanner.js';
+import { D2cStrut } from './struts/d2c.js';
+import { D2rStrut } from './struts/d2r.js';
 import { Pointer } from './struts/pointer.js';
 import { dump } from './util/dump.js';
 
 export class Diablo2Process {
+  version: Diablo2Version;
   process: Process;
 
   lastGoodAddress = {
-    name: 0x7fffd0724060,
-    player: 0x23b8f2c0,
+    name: Number(process.env.D2_MEMORY_PLAYER_NAME || 0),
+    player: Number(process.env.D2_MEMORY_PLAYER_UNIT || 0),
   };
 
-  constructor(proc: Process) {
+  constructor(proc: Process, version: Diablo2Version) {
     this.process = proc;
+    this.version = version;
+  }
+
+  get strut(): typeof D2cStrut | typeof D2rStrut {
+    if (this.version === Diablo2Version.Classic) return D2cStrut;
+    return D2rStrut;
   }
 
   async dump(address: number, count = 100): Promise<void> {
@@ -32,43 +40,55 @@ export class Diablo2Process {
   }
 
   /** Find the running diablo2 process */
-  static async find(game: string | number = 'Game.exe'): Promise<Diablo2Process | null> {
-    if (typeof game === 'number') return new Diablo2Process(new Process(game));
-    const pid = await Process.findPidByName(game);
-    if (pid == null) return null;
-    return new Diablo2Process(new Process(pid));
+  static async find(version: Diablo2Version): Promise<Diablo2Process> {
+    if (version === Diablo2Version.Resurrected) Pointer.type = bp.lu64;
+    if (version === Diablo2Version.Classic) Pointer.type = bp.lu32;
+    const procName = version === Diablo2Version.Classic ? 'Game.exe' : 'D2R.exe';
+    const pid = await Process.findPidByName(procName);
+    if (pid == null) throw new Error('Unable to find process: ' + procName);
+    return new Diablo2Process(new Process(pid), version);
   }
 
-  async scanForPlayerD2r(playerName: string, logger: LogType): Promise<Diablo2Player | null> {
-    for await (const mem of this.process.scanDistance(this.lastGoodAddress.name, (f) => f.line.startsWith('7fff'))) {
+  async scanForPlayer(playerName: string, logger: LogType): Promise<Diablo2Player | null> {
+    const struts = this.strut;
+    if (this.lastGoodAddress.name > 0) {
+      logger.info({ lastGoodAddress: this.lastGoodAddress }, 'Offsets:Previous');
+    }
+
+    for await (const mem of this.process.scanDistance(this.lastGoodAddress.name, (f) => {
+      if (this.version === Diablo2Version.Classic) return true;
+      return f.line.includes('7fff');
+    })) {
       for (const nameOffset of ScannerBuffer.text(mem.buffer, playerName, 16)) {
         const playerNameOffset = nameOffset + mem.map.start;
 
-        const strut = PlayerStrut.raw(mem.buffer, nameOffset);
+        const strut = struts.PlayerData.raw(mem.buffer, nameOffset);
 
-        if (!strut.quest.normal.isValid) continue;
-        if (!strut.quest.nightmare.isValid) continue;
-        if (!strut.quest.hell.isValid) continue;
+        if (!strut.questNormal.isValid) continue;
+        if (!strut.questNightmare.isValid) continue;
+        if (!strut.questHell.isValid) continue;
 
-        if (!strut.waypoint.normal.isValid) continue;
-        if (!strut.waypoint.nightmare.isValid) continue;
-        if (!strut.waypoint.hell.isValid) continue;
-        logger.info({ offset: toHex(nameOffset + mem.map.start) }, 'Player:Offset');
-        const pointerBuf = ScannerBuffer.lu64(playerNameOffset);
+        if (!strut.wpNormal.isValid) continue;
+        if (!strut.wpNightmare.isValid) continue;
+        if (!strut.wpHell.isValid) continue;
+
+        logger.info({ offset: toHex(playerNameOffset) }, 'Player:Offset');
 
         const lastPlayer = this.lastGoodAddress.player;
         for await (const p of this.process.scanDistance(
           lastPlayer,
-          (f) => lastPlayer === 0 || Math.abs(f.start - lastPlayer) < 0x0fffffff,
+          (f) => lastPlayer === 0 || Math.abs(f.start - lastPlayer) < 0x0f_ff_ff_ff,
         )) {
-          for (const off of ScannerBuffer.buffer(p.buffer, pointerBuf)) {
-            const playerStrutOffset = off - 16;
+          for (const off of ScannerBuffer.pointer(p.buffer, playerNameOffset)) {
+            const verOffset = this.version === Diablo2Version.Classic ? 20 : 16;
+            const playerRelStrutOffset = off - verOffset;
+            const playerStrutOffset = playerRelStrutOffset + p.map.start;
 
-            const unit = D2RStrut.UnitPlayer.raw(p.buffer, playerStrutOffset);
+            const unit = struts.UnitPlayer.raw(p.buffer, playerRelStrutOffset);
             logger.info(
               {
-                offset: toHex(nameOffset + mem.map.start),
-                unit: toHex(playerStrutOffset + p.map.start),
+                offset: toHex(playerNameOffset),
+                unit: toHex(playerStrutOffset),
                 pointers: Pointer.isPointersValid(unit),
               },
               'Player:Offset:Pointer',
@@ -76,14 +96,14 @@ export class Diablo2Process {
 
             if (Pointer.isPointersValid(unit) === 0) continue;
             logger.info(
-              { offset: toHex(nameOffset + mem.map.start), unit: toHex(playerStrutOffset + p.map.start) },
+              { offset: toHex(playerNameOffset), unit: toHex(playerStrutOffset) },
               'Player:Offset:Pointer:Found',
             );
 
-            this.lastGoodAddress.player = playerStrutOffset + p.map.start;
+            this.lastGoodAddress.player = playerStrutOffset;
             this.lastGoodAddress.name = playerNameOffset;
 
-            return new Diablo2Player(this, playerStrutOffset + p.map.start);
+            return new Diablo2Player(this, playerStrutOffset);
           }
         }
       }
@@ -91,74 +111,5 @@ export class Diablo2Process {
 
     logger.warn({ playerName }, 'Player:NotFound');
     process.exit();
-  }
-
-  async scanForPlayerD2c(playerName: string, logger: LogType): Promise<Diablo2Player | null> {
-    // Find all references to the player name
-    logger.info({ process: this.process.pid, playerName }, 'StartScan');
-    // Look for objects that look like the PlayerStrut object
-    const goodOffsets: number[] = [];
-    console.log('ScanName', playerName);
-
-    for await (const offset of Scanner.text(this.process, playerName, 16)) {
-      logger.info({ process: this.process.pid, playerName, offset: toHex(offset) }, 'NameOffsets');
-
-      const strut = await this.readStrutAt(offset, PlayerStrut);
-
-      if (!strut.waypoint.normal.isValid) continue;
-      if (!strut.waypoint.nightmare.isValid) continue;
-      if (!strut.waypoint.hell.isValid) continue;
-
-      if (!strut.quest.normal.isValid) continue;
-      if (!strut.quest.nightmare.isValid) continue;
-      if (!strut.quest.hell.isValid) continue;
-      logger.debug({ offset: toHex(offset), player: strut }, 'FoundOffset');
-
-      goodOffsets.push(offset);
-    }
-
-    if (goodOffsets.length === 0) {
-      logger.error({}, 'Unable to find player information');
-      return null;
-    }
-
-    // Find pointers to the player strut and see if any look like the Act object
-    const res = await this.scanForPlayerUnit(goodOffsets, logger);
-
-    if (res == null) {
-      logger.error({}, 'Unable to find player information');
-      return null;
-    }
-
-    const player = await res.player;
-    const act = await res.getAct(player, logger);
-    logger.info({ offset: toHex(player.pAct.offset), mapSeed: act.mapSeed }, 'MapSeed');
-
-    const path = await res.getPath(player, logger);
-    logger.info({ offset: toHex(player.pPath.offset), path: path }, 'Path');
-
-    return res;
-  }
-
-  async scanForPlayerUnit(offsets: number[], logger: LogType): Promise<Diablo2Player | null> {
-    for await (const { buffer, offset } of this.process.scan()) {
-      for (let i = 0; i < buffer.length - Pointer.type.size; i++) {
-        const val = Pointer.type.raw(buffer, i);
-
-        for (const off of offsets) {
-          if (val !== off) continue;
-          const unitAny = D2RStrut.UnitPlayer.raw(buffer, i - 16);
-
-          // Unit should be a player
-          if (unitAny.type !== 1) continue;
-
-          if (unitAny.pAct.offset === 0) continue;
-          logger.info({ offset: toHex(offset + i), player: unitAny, from: toHex(off) }, 'FoundPlayer');
-
-          return new Diablo2Player(this, offset + i - 16);
-        }
-      }
-    }
-    return null;
   }
 }

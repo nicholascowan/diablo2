@@ -11,6 +11,7 @@
 #include "d2_version.h"
 #include "d2data/d2_game_object.h"
 #include "d2data/d2_npc_type.h"
+#include "d2data/d2_level.h"
 #include "json.h"
 #include "log.h"
 #include "map.h"
@@ -235,6 +236,94 @@ char *get_object_type(int code) {
     return "object";
 }
 
+char *get_object_class(int code, char* name, int operateFn) {
+    switch (operateFn){
+        case 1: return "casket";
+        case 2: return "shrine";
+        case 3: return "urn";
+
+        case 5: return "barrel";
+        case 7: return "barrel-exploding";
+        case 14: return "bolder";
+        case 19: return "rack-armor";
+        case 20: return "rack-weapon";
+        case 22: return "well";
+        case 23: return "waypoint";
+        case 68: return "urn-evil";
+        case 30: return "chest-exploding";
+        case 40:
+        case 41:
+        case 59:
+        case 58:
+        case 4: 
+            return "chest";
+        case 8: 
+        case 18:
+        case 29:
+            return "door";
+        /** Diablo Seals */
+        case 54:
+        case 52:
+        case 55:
+        case 56:
+        /** Trist stones */
+        case 9:
+
+        /* complelling orb */
+        case 53:
+        /* Horiadric orifice */
+        case 25:
+        /* Sewer Lever */
+        case 45:
+        // /* Hell forge */
+        case 49:
+        /** Tome */
+        case 28:
+        /** Sun altar */
+        case 24: 
+            return "quest";
+    }
+
+    if (code == 580 || code == 581) return "chest-super";
+    return NULL;
+}
+
+bool is_good_exit(Act *pAct, Level *pLevel, int exitId) {
+    // Act 1
+    // BloodMoor -> Den of evil
+    if (pLevel->dwLevelNo == AreaLevel::BloodMoor && exitId == AreaLevel::DenOfEvil) return true;
+
+    // Tamoe Highlands -> Pit
+    if (pLevel->dwLevelNo == AreaLevel::TamoeHighland && exitId == AreaLevel::PitLevel1) return true;
+    // Black Forest -> ForgottenTower
+    if (pLevel->dwLevelNo == AreaLevel::BlackMarsh && exitId == AreaLevel::ForgottenTower) return true;
+
+    // Act 2
+    // Correct tomb
+    if (exitId == pAct->pMisc->dwStaffTombLevel) return true;
+    // Staff Components
+    if (pLevel->dwLevelNo == AreaLevel::FarOasis && exitId == AreaLevel::MaggotLairLevel1) return true;
+    if (pLevel->dwLevelNo == AreaLevel::ValleyOfSnakes && exitId == AreaLevel::ClawViperTempleLevel1) return true;
+    if (pLevel->dwLevelNo == AreaLevel::RockyWaste && exitId == AreaLevel::StonyTombLevel1) return true;
+
+    // Ancient tunnels
+    if (pLevel->dwLevelNo == AreaLevel::LostCity && exitId == AreaLevel::AncientTunnels) return true;
+
+    // Act 3
+    // Parts
+    if (pLevel->dwLevelNo == AreaLevel::SpiderForest && exitId == AreaLevel::SpiderCavern) return true;
+    if (pLevel->dwLevelNo == AreaLevel::FlayerJungle && exitId == AreaLevel::FlayerDungeonLevel1) return true;
+
+    // Kurast -> RuinedTemple 
+    if (pLevel->dwLevelNo == AreaLevel::KurastBazaar && exitId == AreaLevel::RuinedTemple) return true;
+
+    // Act 5
+    // Crystaline passage -> Frozen River
+    if (pLevel->dwLevelNo == AreaLevel::CrystallinePassage && exitId == AreaLevel::FrozenRiver) return true;
+
+    return false;
+}
+
 int dump_objects(Act *pAct, Level *pLevel, Room2 *pRoom2) {
     int offsetX = pLevel->dwPosX * 5;
     int offsetY = pLevel->dwPosY * 5;
@@ -245,7 +334,9 @@ int dump_objects(Act *pAct, Level *pLevel, Room2 *pRoom2) {
     for (PresetUnit *pPresetUnit = pRoom2->pPreset; pPresetUnit; pPresetUnit = pPresetUnit->pPresetNext) {
         char *objectType = NULL;
         char *objectName = NULL;
-        int opCode = 0;
+        char *objectClass = NULL;
+        bool isGoodExit = false;
+        int operateFn = -1;
 
         int objectId = -1;
 
@@ -264,12 +355,14 @@ int dump_objects(Act *pAct, Level *pLevel, Room2 *pRoom2) {
             if (pPresetUnit->dwTxtFileNo < 580) {
                 ObjectTxt *txt = d2common_get_object_txt(gameVersion, pPresetUnit->dwTxtFileNo);
                 objectName = txt->szName;
-                if (txt->nSelectable0) opCode = txt->nOperateFn;
+                if (txt->nSelectable0) operateFn = txt->nOperateFn;
             }
+            objectClass = get_object_class(pPresetUnit->dwTxtFileNo, objectName, operateFn);
         } else if (pPresetUnit->dwType == UNIT_TYPE_TILE) {
             for (RoomTile *pRoomTile = pRoom2->pRoomTiles; pRoomTile; pRoomTile = pRoomTile->pNext) {
                 if (*pRoomTile->nNum == pPresetUnit->dwTxtFileNo) {
                     objectId = pRoomTile->pRoom2->pLevel->dwLevelNo;
+                    if (is_good_exit(pAct, pLevel, objectId)) isGoodExit = true;
                     objectType = "exit";
                 }
             }
@@ -282,7 +375,9 @@ int dump_objects(Act *pAct, Level *pLevel, Room2 *pRoom2) {
             json_key_value("x", coordX);
             json_key_value("y", coordY);
             if (objectName) json_key_value("name", objectName);
-            if (opCode) json_key_value("op", opCode);
+            if (operateFn > -1) json_key_value("op", operateFn);
+            if (isGoodExit) json_key_value("isGoodExit", true);
+            if (objectClass) json_key_value("class", objectClass);
             json_object_end();
         }
     }

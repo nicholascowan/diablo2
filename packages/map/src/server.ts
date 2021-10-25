@@ -7,7 +7,7 @@ import { MapCluster } from './map/map.process.js';
 import { HttpError, Request, Route } from './route.js';
 import { HealthRoute } from './routes/health.js';
 import { MapImageRoute } from './routes/map.image.js';
-import { MapActRoute, MapRoute } from './routes/map.js';
+import { MapActLevelRoute, MapActRoute, MapRoute } from './routes/map.js';
 
 class Diablo2MapServer {
   server = express.default();
@@ -56,11 +56,21 @@ class Diablo2MapServer {
     this.bind(new HealthRoute());
     this.bind(new MapRoute());
     this.bind(new MapActRoute());
+    this.bind(new MapActLevelRoute());
     this.bind(new MapImageRoute());
 
     await new Promise<void>((resolve) => {
       this.server.listen(this.port, () => {
-        Log.info({ port: this.port, processes: MapCluster.ProcessCount }, 'Server started...');
+        Log.info(
+          {
+            port: this.port,
+            url: 'http://localhost:' + this.port,
+            processes: MapCluster.ProcessCount,
+            version: process.env.GIT_VERSION,
+            hash: process.env.GIT_HASH,
+          },
+          'Server started...',
+        );
         resolve();
       });
     });

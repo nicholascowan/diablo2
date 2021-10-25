@@ -1,5 +1,5 @@
 import { Diablo2State } from '@diablo2/core';
-import { Attribute, Difficulty } from '@diablo2/data';
+import { Attribute } from '@diablo2/data';
 import { Diablo2Process } from './d2.js';
 import { Diablo2Player } from './d2.player.js';
 import { id, Log, LogType } from './logger.js';
@@ -14,9 +14,6 @@ export class Diablo2GameSessionMemory {
   player: Diablo2Player | null;
   /** Delay to wait between ticks */
   tickSpeed = 250;
-
-  /** Default difficulty to use */
-  static Difficulty = Difficulty.Nightmare;
 
   constructor(proc: Diablo2Process, playerName: string) {
     this.d2 = proc;
@@ -58,7 +55,7 @@ export class Diablo2GameSessionMemory {
       await sleep(Math.min(backOff * 500, 5_000));
       backOff++;
 
-      this.player = await this.d2.scanForPlayerD2r(this.playerName, logger);
+      this.player = await this.d2.scanForPlayer(this.playerName, logger);
       if (this.player == null) continue;
       return this.player;
     }
@@ -77,7 +74,7 @@ export class Diablo2GameSessionMemory {
     // Track map information
     if (act.mapSeed !== this.state.map.id) {
       this.state.map.id = act.mapSeed;
-      this.state.map.difficulty = Diablo2GameSessionMemory.Difficulty;
+      this.state.map.difficulty = await obj.getDifficulty(act, logger);
       this.state.log.info({ map: this.state.map }, 'MapSeed:Changed');
     }
 
