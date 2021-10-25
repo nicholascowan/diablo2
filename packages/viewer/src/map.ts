@@ -11,12 +11,6 @@ declare const maplibregl: any;
 export class Diablo2MapViewer {
   map: any;
 
-<<<<<<< HEAD
-  difficulty = Difficulty.Nightmare;
-  act = Act.ActV;
-  seed = 0x00ff00ff;
-=======
->>>>>>> upstream/master
   color = 'white';
   updateUrlTimer: unknown;
   ctx: Diablo2GameState;
@@ -95,19 +89,11 @@ export class Diablo2MapViewer {
 
   updateFromUrl(): void {
     const urlParams = new URLSearchParams(window.location.search);
-<<<<<<< HEAD
-
-    this.seed = Number(urlParams.get('seed'));
-    if (isNaN(this.seed) || this.seed <= 0) this.seed = 0x00ff00ff;
-    this.act = ActUtil.fromString(urlParams.get('act')) ?? Act.ActI;
-    this.difficulty = DifficultyUtil.fromString(urlParams.get('difficulty')) ?? Difficulty.Normal;
-=======
     const state = this.ctx.state;
     state.map.id = Number(urlParams.get('seed'));
     if (isNaN(state.map.id) || state.map.id <= 0) state.map.id = 0x00ff00ff;
     state.map.act = ActUtil.fromString(urlParams.get('act')) ?? Act.ActI;
     state.map.difficulty = DifficultyUtil.fromString(urlParams.get('difficulty')) ?? Difficulty.Normal;
->>>>>>> upstream/master
     this.color = urlParams.get('color') || 'white';
 
     if (window.location.hash == null) return;
@@ -123,15 +109,9 @@ export class Diablo2MapViewer {
     const state = this.ctx.state;
 
     const urlParams = new URLSearchParams(window.location.search);
-<<<<<<< HEAD
-    urlParams.set('seed', toHex(this.seed, 8));
-    urlParams.set('act', Act[this.act]);
-    urlParams.set('difficulty', Difficulty[this.difficulty]);
-=======
     urlParams.set('seed', toHex(state.map.id, 8));
     urlParams.set('act', Act[state.map.act]);
     urlParams.set('difficulty', Difficulty[state.map.difficulty]);
->>>>>>> upstream/master
     urlParams.set('color', this.color);
     const center = this.map.getCenter();
     if (center == null) throw new Error('Invalid Map location');
@@ -156,9 +136,6 @@ export class Diablo2MapViewer {
   update(): void {
     this.updateUrl();
     this.updateDom();
-<<<<<<< HEAD
-    const d2Url = `${toHex(this.seed, 8)}/${Difficulty[this.difficulty]}/${Act[this.act]}/{z}/{x}/{y}/${this.color}`;
-=======
 
     const state = this.ctx.state;
     const map = state.map;
@@ -181,7 +158,6 @@ export class Diablo2MapViewer {
 
     const d2Url = `${toHex(map.id, 8)}/${Difficulty[map.difficulty]}/${Act[map.act]}/{z}/{x}/{y}/${this.color}`;
 
->>>>>>> upstream/master
     if (this.lastUrl === d2Url) return;
     this.lastUrl = d2Url;
 
@@ -257,5 +233,4 @@ export class Diablo2MapViewer {
       }
     });
   }
-
 }
